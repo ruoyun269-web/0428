@@ -47,7 +47,13 @@ def index():
     link += "<br><a href='/road1'>肇事路口查詢 (進階表單版)</a><br>"
     link += "<br><a href='/weather'>天氣預報查詢</a><hr>"
     link += "<br><a href='/rate'>本週新片DB</a><br>"
+    link += "<br><a href='/webdamo'>聊天機器人</a><br>"
     return link
+
+
+@app.route("/webdamo")
+def webdamo():
+    return render_template("webdamo.html")
 
 
 
