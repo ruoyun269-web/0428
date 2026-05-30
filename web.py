@@ -8,7 +8,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import urllib3
 import time  # <--- 確保這行一定要有！
-
+from google import genai
+from google.genai import types
 
 # 判斷是在 Vercel 還是本地
 if not firebase_admin._apps:  # 加入檢查避免重複啟動
@@ -25,6 +26,7 @@ if not firebase_admin._apps:  # 加入檢查避免重複啟動
 
 db = firestore.client()
 app = Flask(__name__)
+client = genai.Client()
 
 @app.route("/")
 def index():
@@ -48,29 +50,84 @@ def index():
     link += "<br><a href='/weather'>天氣預報查詢</a><hr>"
     link += "<br><a href='/rate'>本週新片DB</a><br>"
     link += "<br><a href='/webdamo'>聊天機器人</a><br>"
+    link += "<a href='/ask'>Gemini AI</a><hr>"
     return link
 
+@app.route('/ask', methods=['GET', 'POST']) 
+def ask():
+    if request.method == "POST":
+        user_prompt = request.form.get('prompt', '')
+        if not user_prompt:
+            return "請輸入內容", 400
+        try:
+            c = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+            response = c.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=user_prompt,
+            )
+            return response.text
+        except Exception as e:
+            return f"發生錯誤: {str(e)}", 500
+    else:    
+        return render_template("ask.html")
+    
+@app.route("/webhook7", methods=["POST"])
+def webhook7():
+    req = request.get_json(force=True)
+    action = req.get("queryResult").get("action")
+
+    if action == "rateChoice":
+        rate = req.get("queryResult").get("parameters").get("rate")
+        info = "您選擇的電影分級是：" + rate + "，相關電影：\n"
+        db = firestore.client()
+        docs = db.collection("本週新片含分級").get()
+        result = ""
+        for doc in docs:
+            d = doc.to_dict()
+            if rate in d["rate"]:
+                result += "片名：" + d["title"] + "\n"
+                result += "介紹：" + d["hyperlink"] + "\n\n"
+        if result == "":
+            result = "本週沒有符合該分級的電影"
+        info += result
+
+    elif action == "input.unknown":
+        user_input = req["queryResult"]["queryText"]
+        try:
+            c = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+            ai_config = types.GenerateContentConfig(
+                max_output_tokens=400
+            )
+            response = c.models.generate_content(
+                model="gemini-3.5-flash",
+                contents=f"請用純文字、不要用Markdown，用一句話（50字內）回答：{user_input}",
+                config=ai_config,
+            )
+            info = response.text.replace("**", "").replace("##", "").replace("###", "")
+            # 強制截斷在60字
+            if len(info) > 60:
+                info = info[:60] + "..."
+        except Exception as e:
+            info = f"AI 發生錯誤：{str(e)}"
+
+    return make_response(jsonify({"fulfillmentText": info}))
 
 @app.route("/webdamo")
 def webdamo():
     return render_template("webdamo.html")
 
-
-
-
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     req = request.get_json(force=True)
     action = req["queryResult"]["action"]
-   
+    
     if action == "rateChoice":
         rate = req["queryResult"]["parameters"]["rate"]
-       
+
         db = firestore.client()
         collection_ref = db.collection("本週新片含分級")
         docs = collection_ref.where("rate", "==", rate).get()
-       
+        
         res = f"我是鍾若筠設計的機器人，找出的本週 {rate} 電影有：\n"
         found = False
         for doc in docs:

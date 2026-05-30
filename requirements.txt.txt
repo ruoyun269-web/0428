@@ -1,5 +1,0 @@
-Flask
-firebase-admin
-beautifulsoup4
-requests
-urllib3
